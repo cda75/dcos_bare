@@ -1,0 +1,82 @@
+---
+- hosts: localhost
+
+  tasks:
+    - name: Create genconf directory
+      file: path=/etc/ansible/dcos_bare/genconf/ state=directory
+
+    - name: Create configuration file
+      blockinfile:
+        dest: /etc/ansible/dcos_bare/genconf/config.yaml
+        create: yes
+        state: present
+        block: |
+          ---
+          bootstrap_url: http://{{ansible_default_ipv4.address}}:8282
+          cluster_name: 'AMT'
+          exhibitor_storage_backend: static
+          ip_detect_filename: /etc/ansible/dcos_bare/genconf/ip-detect
+          master_discovery: static
+          resolvers:
+          - 8.8.4.4
+          - 8.8.8.8
+          master_list:
+
+    - name: Add master ip
+      lineinfile:
+        dest: /etc/ansible/dcos_bare/genconf/config.yaml
+        create: yes
+        state: present
+        line: "- {{ hostvars[item].ip }}"
+      with_items: "{{ groups['dcos_master'] }}"
+
+    - name: Add agents
+      shell: echo -e "agent_list:" >> /etc/ansible/dcos_bare/genconf/config.yaml
+
+    - name: Add agent ip
+      lineinfile:
+        dest: /etc/ansible/dcos_bare/genconf/config.yaml
+        create: yes
+        state: present
+        line: "- {{ hostvars[item].ip }}"
+      with_items: "{{ groups['dcos_agent'] }}"
+
+    - name: Remove marker line in file
+      lineinfile:
+        dest: /etc/ansible/dcos_bare/genconf/config.yaml
+        state: absent
+        line: regexp ^#BEGIN
+
+    - name: Create ip-detect script
+      lineinfile:
+        dest: /etc/ansible/dcos_bare/genconf/ip-detect
+        create: yes
+        state: present
+        line: "{{item}}"
+      with_items:
+        - "#!/bin/sh"
+        - iface=`ip route | grep default | awk '{print $5}'`
+        - echo $(ip addr show $iface | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | head -1)
+
+    - name: Downloading DC/OS installer
+      get_url: 
+        url: https://downloads.dcos.io/dcos/EarlyAccess/commit/14509fe1e7899f439527fb39867194c7a425c771/dcos_generate_config.sh
+        dest: /etc/ansible/dcos_bare/
+        validate_certs: no
+
+    - name: Pull Docker NGINX Container
+      command: docker pull nginx
+
+    - name: Generate DC/OS build file
+      shell: bash /etc/ansible/dcos_bare/dcos_generate_config.sh
+
+    - name: Run Docker Containet
+      command: docker run -d -p 8282:80 -v /etc/ansible/dcos_bare/genconf/serve:/usr/share/nginx/html:ro nginx
+      
+
+
+
+
+
+
+
